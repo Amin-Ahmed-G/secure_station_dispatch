@@ -16,6 +16,12 @@ find_package(geometry_msgs REQUIRED)
 find_package(action_msgs REQUIRED)
 
 # ── Generate custom message and action interfaces ──────────────────────────────
+# NOTE: rosidl_generate_interfaces creates the Python bindings under
+#       <install>/lib/python3.x/site-packages/secure_station_dispatch/
+#       so the Python source package must be installed to a DIFFERENT path to
+#       avoid target name collisions with ament_python_install_package().
+#       We therefore install the Python source tree directly with install()
+#       and set PYTHONPATH via ament_environment_hooks instead.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/StationMarker.msg"
   "action/StationTask.action"
@@ -26,8 +32,17 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     action_msgs
 )
 
-# ── Install Python package (secure_station_dispatch/) ─────────────────────────
-ament_python_install_package(${PROJECT_NAME})
+# ── Install Python source package ─────────────────────────────────────────────
+# Install the entire secure_station_dispatch/ Python tree into site-packages so
+# "from secure_station_dispatch.security.checks import ..." works at runtime.
+# We use install(DIRECTORY) rather than ament_python_install_package() because
+# the latter clashes with rosidl's internal CMake target of the same name.
+install(DIRECTORY
+  secure_station_dispatch/
+  DESTINATION lib/python3.12/site-packages/secure_station_dispatch
+  FILES_MATCHING
+    PATTERN "*.py"
+)
 
 # ── Install Python node executables ───────────────────────────────────────────
 install(PROGRAMS
