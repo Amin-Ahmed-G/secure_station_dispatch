@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>secure_station_dispatch</name>
+  <version>0.1.0</version>
+  <description>
+    AMR station dispatch simulation with ArUco marker detection, ROS 2 action-based
+    task simulation, and a state-machine dispatcher.  Phase 1: unsecured baseline
+    satisfying assignment requirements.  Phase 2 (portfolio): HMAC authentication
+    and pose-consistency checks.
+  </description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>MIT</license>
+
+  <!-- Build tool -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <!-- Message / action dependencies -->
+  <depend>builtin_interfaces</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>action_msgs</depend>
+
+  <!-- Runtime dependencies -->
+  <depend>rclpy</depend>
+  <depend>cv_bridge</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+
+  <!-- rosidl runtime -->
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <!-- ament index -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
