@@ -92,6 +92,8 @@ class MockImagePublisher(Node):
         self._idx += 1
 
         img = generate_marker_image(marker_id)
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         msg = self._bridge.cv2_to_imgmsg(img, encoding='bgr8')
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'camera_frame'

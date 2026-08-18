@@ -60,6 +60,29 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
   RENAME task_simulator
 )
+install(PROGRAMS
+  secure_station_dispatch/waypoint_tour_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME waypoint_tour
+)
+
+# ── Install config, launch, worlds, models ────────────────────────────────────
+install(DIRECTORY
+  config/
+  DESTINATION share/${PROJECT_NAME}/config
+)
+install(DIRECTORY
+  launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+install(DIRECTORY
+  worlds/
+  DESTINATION share/${PROJECT_NAME}/worlds
+)
+install(DIRECTORY
+  models/
+  DESTINATION share/${PROJECT_NAME}/models
+)
 
 # ── Install test / utility / attack scripts ────────────────────────────────────
 install(PROGRAMS
