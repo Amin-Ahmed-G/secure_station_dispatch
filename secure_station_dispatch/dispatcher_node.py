@@ -25,6 +25,7 @@ Phase 1 — this keeps Phase 1 logic intact and Phase 2 additive only.
 import os
 import json
 import time
+import yaml
 from enum import Enum, auto
 from datetime import datetime, timezone
 
@@ -66,6 +67,21 @@ class DispatcherNode(Node):
 
         self._enable_security: bool = self.get_parameter('enable_security').value
 
+        registry_path = self.get_parameter('registry_path').value
+        if not registry_path or not os.path.exists(registry_path):
+            try:
+                from ament_index_python.packages import get_package_share_directory
+                pkg_share = get_package_share_directory('secure_station_dispatch')
+                registry_path = os.path.join(pkg_share, 'config', 'station_registry.yaml')
+            except Exception:
+                dev_path = os.path.join(
+                    os.path.dirname(__file__), '..', 'config', 'station_registry.yaml'
+                )
+                if os.path.exists(dev_path):
+                    registry_path = dev_path
+
+        self.registry = self._load_registry(registry_path)
+
         # ── State machine ─────────────────────────────────────────────────────
         self._state = DispatchState.IDLE
         self._active_marker_id: int | None = None
@@ -96,6 +112,20 @@ class DispatcherNode(Node):
             f'| security_mode={self._enable_security}'
         )
 
+    def _load_registry(self, path: str) -> dict:
+        try:
+            with open(path, 'r') as f:
+                data = yaml.safe_load(f)
+            stations = {int(k): v for k, v in data.get('stations', {}).items()}
+            self.get_logger().info(
+                f'Loaded station registry from {path}: '
+                f'{list(stations.keys())} markers'
+            )
+            return stations
+        except Exception as e:
+            self.get_logger().error(f'Failed to load registry from {path}: {e}')
+            return {}
+
     # ── Marker callback ───────────────────────────────────────────────────────
     def _marker_callback(self, msg: StationMarker):
         # ── State guard: ignore detections while a task is running ────────────
@@ -111,9 +141,9 @@ class DispatcherNode(Node):
             f'(conf={msg.confidence:.2f})'
         )
 
-        # ── Phase 2 security checks (no-ops in Phase 1) ───────────────────────
+        # ── Phase 2 security checks ───────────────────────────────────────────
         if self._enable_security:
-            if not verify_hmac(msg):
+            if not verify_hmac(msg, self.registry):
                 self._log_event(msg, outcome='AUTH_FAIL')
                 self.get_logger().warn(
                     f'[SECURITY] AUTH_FAIL for marker {msg.marker_id} '
@@ -121,7 +151,7 @@ class DispatcherNode(Node):
                 )
                 return
 
-            if not check_pose(msg):
+            if not check_pose(msg, self.registry):
                 self._log_event(msg, outcome='LOCATION_MISMATCH')
                 self.get_logger().warn(
                     f'[SECURITY] LOCATION_MISMATCH for marker {msg.marker_id} '

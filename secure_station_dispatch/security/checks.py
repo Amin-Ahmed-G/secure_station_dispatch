@@ -1,69 +1,53 @@
 """
 security/checks.py
 ──────────────────
-Phase 1: stub implementations — both checks always return True so the
-dispatcher's Phase 1 code path is unaffected.
+Phase 2 Security Module: HMAC authentication & pose-consistency verification.
 
-Phase 2 (portfolio): replace these implementations with real HMAC verification
-and pose-consistency checking without touching dispatcher_node.py.
-
-Public API expected by dispatcher_node.py:
-  verify_hmac(msg: StationMarker) -> bool
-  check_pose(msg: StationMarker)  -> bool
+Provides verification functions for DispatcherNode:
+  verify_hmac(msg: StationMarker, registry: dict) -> bool
+  check_pose(msg: StationMarker, registry: dict)  -> bool
 """
 
-# ─── Phase 1 stubs (no-ops) ───────────────────────────────────────────────────
+import hmac as _hmac
+import hashlib
+import math
 
-def verify_hmac(msg) -> bool:
+
+def verify_hmac(msg, registry: dict | None = None) -> bool:
     """
-    Phase 1 stub — always passes.
-
-    Phase 2 implementation:
-      import hmac, hashlib
-      payload = f"{msg.marker_id}{msg.station_name}".encode()
-      key     = registry[msg.marker_id]['hmac_key'].encode()
-      expected = hmac.new(key, payload, hashlib.sha256).hexdigest()
-      return hmac.compare_digest(expected, msg.hmac_signature)
+    Verify HMAC-SHA256 signature of a StationMarker message.
+    Payload signed: f"{msg.marker_id}{msg.station_name}"
     """
-    return True
+    if not registry or msg.marker_id not in registry:
+        return False
+    
+    station = registry[msg.marker_id]
+    key_str = station.get('hmac_key')
+    if not key_str:
+        return False
+
+    key = key_str.encode('utf-8')
+    payload = f"{msg.marker_id}{msg.station_name}".encode('utf-8')
+    expected = _hmac.new(key, payload, hashlib.sha256).hexdigest()
+
+    return _hmac.compare_digest(expected, msg.hmac_signature or '')
 
 
-def check_pose(msg) -> bool:
+def check_pose(msg, registry: dict | None = None) -> bool:
     """
-    Phase 1 stub — always passes.
-
-    Phase 2 implementation:
-      import math
-      expected = registry[msg.marker_id]['expected_pose']   # [x, y, z]
-      tolerance = registry[msg.marker_id]['pose_tolerance_m']
-      robot_pos = msg.robot_pose[:3]                        # [x, y, z]
-      dist = math.sqrt(sum((a - b)**2 for a, b in zip(robot_pos, expected)))
-      return dist <= tolerance
+    Verify robot_pose in StationMarker message is within tolerance of
+    the station's expected_pose in station_registry.yaml.
     """
-    return True
+    if not registry or msg.marker_id not in registry:
+        return False
 
+    station = registry[msg.marker_id]
+    expected = station.get('expected_pose')        # [x, y, z]
+    tolerance = station.get('pose_tolerance_m', 0.5)
 
-# ─── Phase 2 real implementations (commented out; uncomment to activate) ──────
-#
-# import hmac as _hmac
-# import hashlib
-# import math
-#
-# _REGISTRY: dict = {}   # set by dispatcher_node during init
-#
-# def verify_hmac(msg) -> bool:
-#     if msg.marker_id not in _REGISTRY:
-#         return False
-#     key     = _REGISTRY[msg.marker_id]['hmac_key'].encode()
-#     payload = f"{msg.marker_id}{msg.station_name}".encode()
-#     expected = _hmac.new(key, payload, hashlib.sha256).hexdigest()
-#     return _hmac.compare_digest(expected, msg.hmac_signature)
-#
-# def check_pose(msg) -> bool:
-#     if msg.marker_id not in _REGISTRY:
-#         return False
-#     expected  = _REGISTRY[msg.marker_id]['expected_pose']
-#     tolerance = _REGISTRY[msg.marker_id]['pose_tolerance_m']
-#     robot_pos = list(msg.robot_pose[:3])
-#     dist = math.sqrt(sum((a - b)**2 for a, b in zip(robot_pos, expected)))
-#     return dist <= tolerance
+    if expected is None:
+        return True
+
+    robot_pos = list(msg.robot_pose[:3])
+    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(robot_pos, expected)))
+    return dist <= tolerance

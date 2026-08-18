@@ -26,6 +26,9 @@ import cv2
 import numpy as np
 import yaml
 
+import hmac
+import hashlib
+
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
 from cv_bridge import CvBridge
@@ -73,18 +76,17 @@ class MarkerDetectorNode(Node):
         self.declare_parameter('mock_pose_topic', '/mock_pose')
 
         registry_path = self.get_parameter('registry_path').value
-        if not registry_path:
-            # Default: config dir relative to this file's package share
-            registry_path = os.path.join(
-                os.path.dirname(__file__), '..', '..', '..', '..', '..', '..', 'share',
-                'secure_station_dispatch', 'config', 'station_registry.yaml'
-            )
-            # Fallback: look relative to the node source for dev installs
-            dev_path = os.path.join(
-                os.path.dirname(__file__), '..', 'config', 'station_registry.yaml'
-            )
-            if not os.path.exists(registry_path) and os.path.exists(dev_path):
-                registry_path = dev_path
+        if not registry_path or not os.path.exists(registry_path):
+            try:
+                from ament_index_python.packages import get_package_share_directory
+                pkg_share = get_package_share_directory('secure_station_dispatch')
+                registry_path = os.path.join(pkg_share, 'config', 'station_registry.yaml')
+            except Exception:
+                dev_path = os.path.join(
+                    os.path.dirname(__file__), '..', 'config', 'station_registry.yaml'
+                )
+                if os.path.exists(dev_path):
+                    registry_path = dev_path
 
         self.registry = self._load_registry(registry_path)
         self.min_confidence: float = self.get_parameter('min_confidence').value
@@ -197,11 +199,18 @@ class MarkerDetectorNode(Node):
                 continue
 
             station = self.registry[marker_id]
+            hmac_sig = ''
+            if 'hmac_key' in station:
+                key = station['hmac_key'].encode('utf-8')
+                payload = f"{marker_id}{station['station_name']}".encode('utf-8')
+                hmac_sig = hmac.new(key, payload, hashlib.sha256).hexdigest()
+
             self._publish_marker(
                 marker_id=marker_id,
                 station_name=station['station_name'],
                 confidence=confidence,
                 stamp=now,
+                hmac_signature=hmac_sig,
             )
 
     def _estimate_confidence(self, corner) -> float:
