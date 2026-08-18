@@ -61,7 +61,7 @@ install(PROGRAMS
   RENAME task_simulator
 )
 
-# ── Install test / utility scripts ────────────────────────────────────────────
+# ── Install test / utility / attack scripts ────────────────────────────────────
 install(PROGRAMS
   test/mock_image_publisher.py
   DESTINATION lib/${PROJECT_NAME}
@@ -71,6 +71,25 @@ install(PROGRAMS
   test/test_dispatch_pipeline.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME test_dispatch_pipeline
+)
+install(PROGRAMS
+  test/test_security_checks.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME test_security_checks
+)
+install(PROGRAMS
+  attacks/spoof_marker_publish.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME spoof_marker_publish
+)
+install(PROGRAMS
+  attacks/location_mismatch_attack.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME location_mismatch_attack
+)
+install(DIRECTORY
+  attacks/
+  DESTINATION share/${PROJECT_NAME}/attacks
 )
 
 # ── Install config, launch ────────────────────────────────────────────────────

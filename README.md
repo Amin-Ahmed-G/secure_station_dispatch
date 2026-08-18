@@ -241,11 +241,53 @@ Phase 2 adds security features on top of Phase 1 **without modifying any Phase 1
 ros2 launch secure_station_dispatch station_dispatch.launch.py enable_security:=true
 ```
 
+### Running Phase 2 Security Test Suite
+
+```bash
+# Run the automated security test (launches task_simulator & dispatcher with security enabled)
+bash test/run_security_test.sh
+```
+
+Expected security test summary:
+```
+============================================================
+  PHASE 2 SECURITY TEST SUMMARY
+============================================================
+  Total security events logged: 4
+  Valid dispatches           : 1
+  Valid completions          : 1
+  AUTH_FAIL rejections       : 1
+  LOCATION_MISMATCH rejections: 1
+
+  Test 1 (Valid signed marker):        ✓ PASS
+  Test 2 (Spoofed HMAC rejected):      ✓ PASS
+  Test 3 (Location mismatch rejected): ✓ PASS
+
+  OVERALL: ✓ PASS — All Phase 2 security protections working
+============================================================
+```
+
+### Running Individual Attack Demonstrations
+
+```bash
+# Terminal 1: Task Simulator
+ros2 run secure_station_dispatch task_simulator
+
+# Terminal 2: Dispatcher (Security Enabled)
+ros2 run secure_station_dispatch dispatcher --ros-args -p enable_security:=true
+
+# Terminal 3: Run Spoofing Attack (Unsigned / forged signature -> AUTH_FAIL)
+ros2 run secure_station_dispatch spoof_marker_publish
+
+# Terminal 3: Run Location Mismatch Attack (Valid signature, wrong pose -> LOCATION_MISMATCH)
+ros2 run secure_station_dispatch location_mismatch_attack
+```
+
 ### Architecture
 
 The `security/checks.py` module provides `verify_hmac()` and `check_pose()`.  
 In Phase 1 both return `True` unconditionally.  
-In Phase 2, replace the stub implementations in that file — **dispatcher_node.py is unchanged**.
+In Phase 2, real HMAC verification and spatial tolerance checks are activated.
 
 ---
 
