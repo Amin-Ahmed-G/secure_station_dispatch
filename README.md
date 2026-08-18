@@ -291,6 +291,28 @@ In Phase 2, real HMAC verification and spatial tolerance checks are activated.
 
 ---
 
+## Phase 3 (Demo Polish — Gazebo Simulation)
+
+Phase 3 provides a Gazebo Sim environment with an AMR robot and physical ArUco markers placed at industrial station coordinates matching `station_registry.yaml`.
+
+### Features
+- **Gazebo Sim World**: `worlds/industrial_station_world.sdf` containing ground, lighting, station walls with high-contrast 4x4_50 ArUco marker textures.
+- **AMR Robot Model**: Differential-drive mobile robot with front-facing camera sensor publishing to `/camera/image_raw`.
+- **Scripted Waypoint Tour**: `waypoint_tour_node.py` navigates the robot to Inspection, Assembly, Storage, and Charging stations in sequence.
+- **ROS GZ Bridge**: Bridges Gazebo `/camera/image_raw`, `/cmd_vel`, and `/odom` topics to ROS 2.
+
+### Running the Gazebo Demo & Tour
+
+```bash
+# Launch full Gazebo Sim demo with security enabled and automated tour
+ros2 launch secure_station_dispatch gazebo_demo.launch.py
+
+# Or run the automated tour test runner script
+bash test/run_gazebo_tour_test.sh
+```
+
+---
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -306,3 +328,4 @@ In Phase 2, real HMAC verification and spatial tolerance checks are activated.
 ## License
 
 MIT — see LICENSE file.
+
