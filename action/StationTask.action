@@ -1,0 +1,15 @@
+# StationTask.action
+# Action interface for the task simulator.
+# Satisfies the "ROS 2 services/actions" official assignment requirement.
+#
+# Goal  ─────────────────────────────────────────────────────────────────────
+string task_type       # "Inspection" | "Assembly" | "Storage" | "Charging"
+string station_name    # human-readable station name from registry
+---
+# Result ────────────────────────────────────────────────────────────────────
+bool   success         # true = task completed, false = aborted/failed
+string summary         # e.g. "Inspection complete at Station A in 3.2 s"
+---
+# Feedback ──────────────────────────────────────────────────────────────────
+string status          # e.g. "Scanning surface…", "Step 2/4: arm moving"
+float32 progress       # 0.0 – 100.0 (percent)
