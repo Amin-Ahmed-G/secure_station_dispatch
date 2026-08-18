@@ -1,0 +1,55 @@
+# station_registry.yaml
+# Maps ArUco marker IDs to station metadata.
+# ────────────────────────────────────────────────────────────────────────────
+# Phase 1 fields (required):
+#   station_name  – human-readable label
+#   task_type     – selects simulation branch in task_simulator_node
+#
+# Phase 2 fields (portfolio / security extension, ignored by Phase 1 code):
+#   hmac_key      – pre-shared secret used by detector to sign messages
+#   expected_pose – [x, y, z] expected robot position at this station (metres)
+#   pose_tolerance_m – radius (metres) within which robot_pose is accepted
+# ────────────────────────────────────────────────────────────────────────────
+
+stations:
+  # Marker 0 ─ Inspection Station
+  0:
+    station_name: "Inspection Station"
+    task_type: "Inspection"
+    # Phase 2 ──────────────────
+    hmac_key: "inspect-secret-key-do-not-share"
+    expected_pose: [1.0, 2.0, 0.0]
+    pose_tolerance_m: 0.5
+
+  # Marker 1 ─ Assembly Station
+  1:
+    station_name: "Assembly Station"
+    task_type: "Assembly"
+    # Phase 2 ──────────────────
+    hmac_key: "assembly-secret-key-do-not-share"
+    expected_pose: [4.5, 1.0, 0.0]
+    pose_tolerance_m: 0.5
+
+  # Marker 2 ─ Storage Station
+  2:
+    station_name: "Storage Station"
+    task_type: "Storage"
+    # Phase 2 ──────────────────
+    hmac_key: "storage-secret-key-do-not-share"
+    expected_pose: [4.5, 5.0, 0.0]
+    pose_tolerance_m: 0.5
+
+  # Marker 3 ─ Charging Station
+  3:
+    station_name: "Charging Station"
+    task_type: "Charging"
+    # Phase 2 ──────────────────
+    hmac_key: "charging-secret-key-do-not-share"
+    expected_pose: [0.5, 5.5, 0.0]
+    pose_tolerance_m: 0.5
+
+# ArUco dictionary used for detection (shared between detector and test scripts)
+aruco_dictionary: "DICT_4X4_50"
+
+# Minimum confidence threshold for a detection to be published
+min_confidence: 0.75
