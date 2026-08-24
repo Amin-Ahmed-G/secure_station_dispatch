@@ -16,7 +16,7 @@
       <render_engine>ogre2</render_engine>
     </plugin>
 
-    <!-- Sun -->
+    <!-- Sun Light -->
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
       <pose>0 0 10 0 0 0</pose>
@@ -29,7 +29,7 @@
       <direction>-0.5 0.1 -0.9</direction>
     </light>
 
-    <!-- Fill light to reduce harsh shadows on markers -->
+    <!-- Fill light -->
     <light type="directional" name="fill_light">
       <cast_shadows>false</cast_shadows>
       <pose>3 3 8 0 0 0</pose>
@@ -40,7 +40,7 @@
     </light>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         Ground Plane — light grey warehouse floor
+         Ground Plane & Zone Boundary
     ═══════════════════════════════════════════════════════════════ -->
     <model name="ground_plane">
       <static>true</static>
@@ -59,9 +59,7 @@
       </link>
     </model>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         Floor grid lines (cosmetic — 6 x 6 m warehouse zone)
-    ═══════════════════════════════════════════════════════════════ -->
+    <!-- Floor border (6x6m zone indicator) -->
     <model name="floor_border">
       <static>true</static>
       <pose>3 3 0.005 0 0 0</pose>
@@ -77,68 +75,20 @@
     </model>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         STATION 0 — INSPECTION  (Blue)
-         expected_pose [1.0, 2.0, 0.0]  →  sign face at y=2.4
+         MINIMAL STATIONS — ArUco Marker Panels (No blocking posts)
+         Station expected_pose + 0.4m Y offset for visual standing distance
     ═══════════════════════════════════════════════════════════════ -->
 
-    <!-- Vertical post -->
-    <model name="s0_post">
-      <static>true</static>
-      <pose>1.0 2.35 0.6 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <!-- Blue backing plate (frame) -->
-    <model name="s0_backing">
-      <static>true</static>
-      <pose>1.0 2.38 0.65 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-          <material>
-            <ambient>0.08 0.33 0.72 1</ambient>
-            <diffuse>0.08 0.33 0.72 1</diffuse>
-            <specular>0.3 0.3 0.3 1</specular>
-          </material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <!-- White inset (inner frame — keeps ArUco contrast clean) -->
-    <model name="s0_inset">
-      <static>true</static>
-      <pose>1.0 2.41 0.60 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.02 0.72</size></box></geometry>
-          <material>
-            <ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <!-- ArUco marker panel — same size/position as original -->
+    <!-- Station 0: Inspection Station (Marker ID 0) at [1.0, 2.0, 0.0] -->
     <model name="station_0_inspection">
       <static>true</static>
-      <pose>1.0 2.43 0.55 0 0 0</pose>
+      <pose>1.0 2.40 0.40 0 0 0</pose>
       <link name="link">
         <collision name="col">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
           <material>
             <diffuse>1 1 1 1</diffuse>
             <pbr><metal>
@@ -149,93 +99,16 @@
       </link>
     </model>
 
-    <!-- Label shelf above marker -->
-    <model name="s0_label_shelf">
-      <static>true</static>
-      <pose>1.0 2.39 1.02 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.05 0.12</size></box></geometry>
-          <material>
-            <ambient>0.05 0.22 0.55 1</ambient>
-            <diffuse>0.05 0.22 0.55 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <!-- Base foot plate -->
-    <model name="s0_foot">
-      <static>true</static>
-      <pose>1.0 2.35 0.03 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-          <material><ambient>0.25 0.25 0.25 1</ambient><diffuse>0.25 0.25 0.25 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         STATION 1 — ASSEMBLY  (Green)
-         expected_pose [4.5, 1.0, 0.0]  →  sign face at y=1.4
-    ═══════════════════════════════════════════════════════════════ -->
-
-    <model name="s1_post">
-      <static>true</static>
-      <pose>4.5 1.35 0.6 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <model name="s1_backing">
-      <static>true</static>
-      <pose>4.5 1.38 0.65 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-          <material>
-            <ambient>0.10 0.60 0.18 1</ambient>
-            <diffuse>0.10 0.60 0.18 1</diffuse>
-            <specular>0.3 0.3 0.3 1</specular>
-          </material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <model name="s1_inset">
-      <static>true</static>
-      <pose>4.5 1.41 0.60 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.02 0.72</size></box></geometry>
-          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
+    <!-- Station 1: Assembly Station (Marker ID 1) at [4.5, 1.0, 0.0] -->
     <model name="station_1_assembly">
       <static>true</static>
-      <pose>4.5 1.43 0.55 0 0 0</pose>
+      <pose>4.5 1.40 0.40 0 0 0</pose>
       <link name="link">
         <collision name="col">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
           <material>
             <diffuse>1 1 1 1</diffuse>
             <pbr><metal>
@@ -246,91 +119,16 @@
       </link>
     </model>
 
-    <model name="s1_label_shelf">
-      <static>true</static>
-      <pose>4.5 1.39 1.02 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.05 0.12</size></box></geometry>
-          <material>
-            <ambient>0.06 0.42 0.12 1</ambient>
-            <diffuse>0.06 0.42 0.12 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="s1_foot">
-      <static>true</static>
-      <pose>4.5 1.35 0.03 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-          <material><ambient>0.25 0.25 0.25 1</ambient><diffuse>0.25 0.25 0.25 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         STATION 2 — STORAGE  (Orange)
-         expected_pose [4.5, 5.0, 0.0]  →  sign face at y=5.4
-    ═══════════════════════════════════════════════════════════════ -->
-
-    <model name="s2_post">
-      <static>true</static>
-      <pose>4.5 5.35 0.6 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <model name="s2_backing">
-      <static>true</static>
-      <pose>4.5 5.38 0.65 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-          <material>
-            <ambient>0.88 0.45 0.04 1</ambient>
-            <diffuse>0.88 0.45 0.04 1</diffuse>
-            <specular>0.3 0.3 0.3 1</specular>
-          </material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <model name="s2_inset">
-      <static>true</static>
-      <pose>4.5 5.41 0.60 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.02 0.72</size></box></geometry>
-          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
+    <!-- Station 2: Storage Station (Marker ID 2) at [4.5, 5.0, 0.0] -->
     <model name="station_2_storage">
       <static>true</static>
-      <pose>4.5 5.43 0.55 0 0 0</pose>
+      <pose>4.5 5.40 0.40 0 0 0</pose>
       <link name="link">
         <collision name="col">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
           <material>
             <diffuse>1 1 1 1</diffuse>
             <pbr><metal>
@@ -341,91 +139,16 @@
       </link>
     </model>
 
-    <model name="s2_label_shelf">
-      <static>true</static>
-      <pose>4.5 5.39 1.02 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.05 0.12</size></box></geometry>
-          <material>
-            <ambient>0.70 0.35 0.02 1</ambient>
-            <diffuse>0.70 0.35 0.02 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="s2_foot">
-      <static>true</static>
-      <pose>4.5 5.35 0.03 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-          <material><ambient>0.25 0.25 0.25 1</ambient><diffuse>0.25 0.25 0.25 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         STATION 3 — CHARGING  (Red)
-         expected_pose [0.5, 5.5, 0.0]  →  sign face at y=5.9
-    ═══════════════════════════════════════════════════════════════ -->
-
-    <model name="s3_post">
-      <static>true</static>
-      <pose>0.5 5.85 0.6 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><cylinder><radius>0.03</radius><length>1.2</length></cylinder></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <model name="s3_backing">
-      <static>true</static>
-      <pose>0.5 5.88 0.65 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-          <material>
-            <ambient>0.80 0.12 0.10 1</ambient>
-            <diffuse>0.80 0.12 0.10 1</diffuse>
-            <specular>0.3 0.3 0.3 1</specular>
-          </material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.72 0.04 0.92</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
-    <model name="s3_inset">
-      <static>true</static>
-      <pose>0.5 5.91 0.60 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.02 0.72</size></box></geometry>
-          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
+    <!-- Station 3: Charging Station (Marker ID 3) at [0.5, 5.5, 0.0] -->
     <model name="station_3_charging">
       <static>true</static>
-      <pose>0.5 5.93 0.55 0 0 0</pose>
+      <pose>0.5 5.90 0.40 0 0 0</pose>
       <link name="link">
         <collision name="col">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>0.6 0.02 0.6</size></box></geometry>
+          <geometry><box><size>0.6 0.01 0.6</size></box></geometry>
           <material>
             <diffuse>1 1 1 1</diffuse>
             <pbr><metal>
@@ -436,41 +159,12 @@
       </link>
     </model>
 
-    <model name="s3_label_shelf">
-      <static>true</static>
-      <pose>0.5 5.89 1.02 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.62 0.05 0.12</size></box></geometry>
-          <material>
-            <ambient>0.62 0.08 0.06 1</ambient>
-            <diffuse>0.62 0.08 0.06 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="s3_foot">
-      <static>true</static>
-      <pose>0.5 5.85 0.03 0 0 0</pose>
-      <link name="link">
-        <visual name="vis">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-          <material><ambient>0.25 0.25 0.25 1</ambient><diffuse>0.25 0.25 0.25 1</diffuse></material>
-        </visual>
-        <collision name="col">
-          <geometry><box><size>0.25 0.25 0.06</size></box></geometry>
-        </collision>
-      </link>
-    </model>
-
     <!-- ═══════════════════════════════════════════════════════════════
-         AMR Robot  (Blue chassis, 2 drive wheels, 2 casters)
+         AMR Mobile Robot with Symmetric Casters & Diff Drive
     ═══════════════════════════════════════════════════════════════ -->
     <model name="amr_robot">
       <pose>0.0 0.0 0.1 0 0 0</pose>
 
-      <!-- Chassis -->
       <link name="chassis">
         <pose>0 0 0.05 0 0 0</pose>
         <inertial>
@@ -490,13 +184,6 @@
             <diffuse>0.1 0.3 0.8 1</diffuse>
             <specular>0.2 0.2 0.2 1</specular>
           </material>
-        </visual>
-
-        <!-- Camera bump (visual) -->
-        <visual name="cam_bump">
-          <pose>0.21 0 0.06 0 0 0</pose>
-          <geometry><box><size>0.04 0.06 0.04</size></box></geometry>
-          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
         </visual>
 
         <!-- Front Camera Sensor -->
@@ -549,7 +236,7 @@
         </visual>
       </link>
 
-      <!-- Rear-Left Caster (was the single rear caster, now mirrored pair) -->
+      <!-- Rear-Left Caster -->
       <link name="caster_left">
         <pose>-0.15 0.10 -0.04 0 0 0</pose>
         <inertial>
@@ -568,7 +255,7 @@
         </visual>
       </link>
 
-      <!-- Rear-Right Caster (new — mirrors rear-left) -->
+      <!-- Rear-Right Caster -->
       <link name="caster_right">
         <pose>-0.15 -0.10 -0.04 0 0 0</pose>
         <inertial>
@@ -606,7 +293,7 @@
         <parent>chassis</parent><child>caster_right</child>
       </joint>
 
-      <!-- Differential Drive Plugin (unchanged) -->
+      <!-- Differential Drive Plugin -->
       <plugin filename="gz-sim-diff-drive-system"
               name="gz::sim::systems::DiffDrive">
         <left_joint>left_wheel_joint</left_joint>
