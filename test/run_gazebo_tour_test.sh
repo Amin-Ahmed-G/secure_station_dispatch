@@ -39,6 +39,10 @@ sleep 2
 echo "=== Executing Scripted Waypoint Tour ==="
 ros2 run secure_station_dispatch waypoint_tour
 
+# Wait for the last station's action task to finish (~3.5 s) before killing nodes
+echo "Waiting 6s for last task to complete..."
+sleep 6
+
 echo ""
 echo "=== dispatch_events.jsonl ==="
 if [ -f "$LOG_FILE" ]; then

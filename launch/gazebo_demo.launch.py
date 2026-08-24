@@ -28,7 +28,7 @@ def generate_launch_description():
 
     # 1. Gazebo Sim headless / GUI process
     gazebo = ExecuteProcess(
-        cmd=['gz', 'sim', '-r', '-s', world_path],
+        cmd=['gz', 'sim', '-r', world_path],
         output='screen'
     )
 
