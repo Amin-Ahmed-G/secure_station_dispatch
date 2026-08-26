@@ -8,8 +8,11 @@ marker_detector_node can be tested without a real camera.
 Phase 1 mode (no pose source): cycles through all marker IDs at 1 Hz.
 Phase 3 mode (with /mock_pose): subscribes to /mock_pose and, using the
 station registry, publishes ONLY the marker whose expected_pose is within
-tolerance of the current robot position.  This prevents LOCATION_MISMATCH
-spam from wrong markers being detected while parked at a different station.
+tolerance of the current robot position.  While the robot is between berths it
+publishes an empty frame rather than falling back to cycling, which mirrors what
+the real mast camera sees: nothing legible until the robot is berthed.  Cycling
+mid-transit would hand the dispatcher a station the robot is nowhere near and
+fill the event log with LOCATION_MISMATCH rejections.
 
 Usage (standalone):
   python3 test/mock_image_publisher.py [--marker_id 0] [--rate 0.5]
@@ -45,6 +48,12 @@ def _get_aruco_dict():
         return cv2.aruco.getPredefinedDictionary(dict_id)   # OpenCV ≥ 4.7
     except AttributeError:
         return cv2.aruco.Dictionary_get(dict_id)            # OpenCV < 4.7
+
+
+def generate_blank_image(image_size: int = 640) -> np.ndarray:
+    """An empty frame — what the camera sees between berths."""
+    canvas = np.full((image_size, image_size), 235, dtype=np.uint8)
+    return cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
 
 
 def generate_marker_image(marker_id: int, image_size: int = 640) -> np.ndarray:
@@ -175,26 +184,42 @@ class MockImagePublisher(Node):
         return best_id
 
     def _publish(self):
-        # ── Pose-aware mode: only publish the marker that matches current pose ──
+        pose_aware = bool(self._registry) and self._robot_pose is not None
         pose_marker = self._marker_for_pose()
-        if pose_marker is not None:
-            marker_id = pose_marker
-        else:
-            # Fallback: round-robin cycling (Phase 1 / standalone mode)
-            marker_id = self._marker_ids[self._idx % len(self._marker_ids)]
-            self._idx += 1
 
-        img = generate_marker_image(marker_id)          # returns BGR uint8
+        if pose_marker is not None:
+            marker_id, mode = pose_marker, 'pose-match'
+            img = generate_marker_image(marker_id)
+        elif pose_aware:
+            # Berthed nowhere: show an empty frame, exactly as the mast camera
+            # would while driving down an aisle.
+            marker_id, mode = None, 'in-transit'
+            img = generate_blank_image()
+        else:
+            # Phase 1 / standalone: no pose source, so round-robin the markers.
+            marker_id = self._marker_ids[self._idx % len(self._marker_ids)]
+            mode = 'cycle'
+            self._idx += 1
+            img = generate_marker_image(marker_id)
+
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        self._pub.publish(_build_image_msg(self, img))
 
-        msg = _build_image_msg(self, img)
-        self._pub.publish(msg)
+        if mode == 'in-transit':
+            self._log_transit()
+        else:
+            self.get_logger().info(
+                f'[MOCK CAM] Published marker {marker_id} image ({mode})'
+            )
 
-        mode = 'pose-match' if pose_marker is not None else 'cycle'
-        self.get_logger().info(
-            f'[MOCK CAM] Published marker {marker_id} image ({mode})'
-        )
+    def _log_transit(self) -> None:
+        """Log transit frames sparsely — they arrive at the publish rate."""
+        self._transit_frames = getattr(self, '_transit_frames', 0) + 1
+        if self._transit_frames % 20 == 1:
+            x, y = self._robot_pose[0], self._robot_pose[1]
+            self.get_logger().info(
+                f'[MOCK CAM] In transit at [{x:.2f}, {y:.2f}] — empty frame')
 
 
 def main(args=None):
