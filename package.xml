@@ -2,12 +2,14 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>secure_station_dispatch</name>
-  <version>0.1.0</version>
+  <version>3.0.0</version>
   <description>
     AMR station dispatch simulation with ArUco marker detection, ROS 2 action-based
-    task simulation, and a state-machine dispatcher.  Phase 1: unsecured baseline
-    satisfying assignment requirements.  Phase 2 (portfolio): HMAC authentication
-    and pose-consistency checks.
+    task execution and a state-machine dispatcher.
+    Phase 1: the perception -> dispatch -> action pipeline.
+    Phase 2: HMAC-SHA256 authentication of detections plus pose-consistency checks.
+    Phase 3: a generated Gazebo facility and an obstacle-aware scripted tour with
+    stall detection and recovery.
   </description>
   <maintainer email="user@example.com">user</maintainer>
   <license>MIT</license>
@@ -30,6 +32,18 @@
   <depend>cv_bridge</depend>
   <depend>launch</depend>
   <depend>launch_ros</depend>
+  <depend>rosgraph_msgs</depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+
+  <!-- Phase 3 simulation.  Not required to build or to run the headless suites,
+       only to launch gazebo_demo.launch.py. -->
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+
+  <!-- Test dependencies -->
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <!-- rosidl runtime -->
   <exec_depend>rosidl_default_runtime</exec_depend>

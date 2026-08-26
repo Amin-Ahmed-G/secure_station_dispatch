@@ -1,340 +1,278 @@
 # secure_station_dispatch
 
-> **ROS 2 package** — AMR ArUco-marker station dispatch simulation  
-> Tested on ROS 2 Humble / Jazzy · Python 3.10+
+**ROS 2 package — AMR station dispatch driven by ArUco fiducials, with HMAC-authenticated
+detections and obstacle-aware navigation.**
+
+Tested on ROS 2 Jazzy (Python 3.12) and Humble (3.10) · Gazebo Sim · OpenCV ≥ 4.7
 
 ---
 
-## Overview & Architecture Narrative
+An autonomous mobile robot tours a walled facility, berths square-on to each of four
+station bays, reads the bay's ArUco marker, authenticates the detection, and executes a
+station-specific task through a ROS 2 action — logging every outcome to a JSONL event log.
 
-This project implements an Autonomous Mobile Robot (AMR) station dispatch pipeline triggered by visual ArUco marker detection. I built this system in three distinct phases:
-
-1. **Phase 1 (Core Pipeline)**: Satisfies the primary ROS 2 assignment requirements — detecting 4x4 ArUco markers from camera images, driving a dispatch state machine, and executing multi-step tasks using ROS 2 action interfaces.
-2. **Phase 2 (Security Extensions)**: Explores real-world vulnerability vectors in autonomous facilities (e.g. marker spoofing and location spoofing attacks) by adding cryptographic HMAC-SHA256 signatures and spatial pose-consistency validation.
-3. **Phase 3 (Gazebo Simulation)**: Brings the full system into a visual 3D Gazebo environment, where an AMR navigates a warehouse world with physical ArUco markers mounted at station locations.
+![Facility layout and planned tour](docs/facility_map.png)
 
 ---
 
-## Assignment Requirement Mapping
+## Contents
 
-| Requirement | Satisfied by |
+| | |
 |---|---|
-| ArUco IDs | `marker_detector_node.py` — detects 4×4\_50 markers via `cv2.aruco` |
-| Camera integration | Subscribes to `/camera/image_raw`; `mock_image_publisher.py` provides a synthetic feed |
-| ROS 2 actions | `task_simulator_node.py` implements the `StationTask` action server; `dispatcher_node.py` is the action client |
-| State machine | `DispatcherNode` maintains `IDLE ↔ TASK_IN_PROGRESS` states |
-| Custom messages | `StationMarker.msg` (Phase 1) |
-| Custom actions | `StationTask.action` (Phase 1) |
+| [Quick start](#quick-start) | Build and run the demo |
+| [What each phase adds](#what-each-phase-adds) | Pipeline → security → simulation |
+| [Stations and markers](#stations-and-markers) | The registry at a glance |
+| [Navigation](#navigation) | Planner, controller, watchdog |
+| [Perception](#perception) | Why the geometry is what it is |
+| [Security](#security) | HMAC and pose consistency |
+| [Testing](#testing) | Three suites, one of them ROS-free |
+| [Documentation](#documentation) | Architecture, root cause, runbook |
 
 ---
 
-## Package Structure
-
-```
-secure_station_dispatch/
-├── msg/
-│   └── StationMarker.msg          # Custom marker detection message
-├── action/
-│   └── StationTask.action         # Custom action interface
-├── config/
-│   └── station_registry.yaml      # Marker ID → station + task mapping
-├── launch/
-│   └── station_dispatch.launch.py # Brings up all 3 nodes
-├── secure_station_dispatch/       # Python package
-│   ├── marker_detector_node.py    # Camera sub → ArUco → StationMarker pub
-│   ├── dispatcher_node.py         # State machine + action client
-│   ├── task_simulator_node.py     # StationTask action server
-│   └── security/
-│       ├── __init__.py
-│       └── checks.py              # Phase 2 stubs (no-ops in Phase 1)
-├── test/
-│   ├── mock_image_publisher.py    # Synthetic ArUco image publisher
-│   └── test_dispatch_pipeline.py  # End-to-end integration test
-├── logs/
-│   └── dispatch_events.jsonl      # Written at runtime
-├── CMakeLists.txt
-├── package.xml
-└── setup.py
-```
-
----
-
-## Phase 1 — Core Dispatcher Pipeline & Build
-
-Phase 1 establishes the baseline dispatch architecture: `marker_detector_node` processes camera frames, `dispatcher_node` manages the state transitions (`IDLE ↔ TASK_IN_PROGRESS`), and `task_simulator_node` handles multi-step action execution. One interesting build challenge encountered on ROS 2 Jazzy was a CMake target collision where `ament_python_install_package` conflicted with `rosidl` generated targets when sharing the package name; resolving this required transitioning to `install(DIRECTORY)` for Python site-packages in `CMakeLists.txt`.
-
-### Prerequisites
+## Quick start
 
 ```bash
-# ROS 2 Humble or Jazzy (sourced)
-source /opt/ros/humble/setup.bash   # or /opt/ros/jazzy/setup.bash
-
-# Python dependencies (OpenCV with contrib for ArUco)
+# Dependencies
+sudo apt-get install -y \
+    ros-$ROS_DISTRO-ros-gz-bridge ros-$ROS_DISTRO-ros-gz-sim \
+    ros-$ROS_DISTRO-cv-bridge ros-$ROS_DISTRO-vision-opencv
 pip install opencv-contrib-python pyyaml
 
-# ROS dependencies (if not already installed)
-sudo apt-get install -y \
-    ros-$ROS_DISTRO-cv-bridge \
-    ros-$ROS_DISTRO-vision-opencv
-```
-
-### Build
-
-```bash
-# Clone / copy the package into your workspace src directory
-mkdir -p ~/ros2_ws/src
-cp -r secure_station_dispatch ~/ros2_ws/src/
-
+# Build
 cd ~/ros2_ws
 colcon build --packages-select secure_station_dispatch --symlink-install
 source install/setup.bash
+
+# Run the full demo
+ros2 launch secure_station_dispatch gazebo_demo.launch.py
 ```
 
-### Option A — Launch all nodes at once
+The robot leaves the staging dock, visits all four bays in ID order, and returns. It
+prints a per-station report and writes `logs/tour_report.json` and
+`logs/dispatch_events.jsonl`.
+
+Faster loops:
 
 ```bash
-cd ~/ros2_ws
-ros2 launch secure_station_dispatch station_dispatch.launch.py
+bash test/run_navigation_checks.sh    # ~1 s, no ROS, no Gazebo
+bash test/run_gazebo_tour_test.sh     # ~90 s, full stack, no Gazebo
+ros2 launch secure_station_dispatch gazebo_demo.launch.py gui:=false
 ```
 
-In a second terminal, run the mock camera (cycle through all 4 markers):
+Full argument list and troubleshooting: **[docs/runbook.md](docs/runbook.md)**.
+
+---
+
+## What each phase adds
+
+**Phase 1 — the dispatch pipeline.** `marker_detector_node` turns camera frames into
+`StationMarker` messages; `dispatcher_node` runs an `IDLE ↔ TASK_IN_PROGRESS` state
+machine and acts as the `StationTask` action client; `task_simulator_node` executes
+multi-step tasks with progress feedback. Custom `.msg` and `.action` interfaces, a YAML
+station registry, and a JSONL event log.
+
+**Phase 2 — authenticating what the camera claims to see.** A printed marker or a forged
+ROS message can drive an unsecured facility robot anywhere. Detections are signed with
+HMAC-SHA256 under a per-station pre-shared key, and the dispatcher additionally checks
+that the robot is physically near the station it claims to be at. Two working attacks
+under `attacks/` demonstrate both rejections.
+
+**Phase 3 — making the robot physically get there.** A generated Gazebo facility, a
+differential-drive AMR with an 0.85 m sensor mast, and an obstacle-aware scripted tour
+with stall detection and recovery.
+
+> Phase 3 originally failed: the robot drove into the Assembly Station's own marker panel
+> while departing for Storage, wedged, and finished the tour from a corrupted pose —
+> while still reporting success. The layout, the planner, the controller and the reporting
+> were all rebuilt around that.
+> **[Read the root cause analysis →](docs/root-cause-phase3-collision.md)**
+
+---
+
+## Stations and markers
+
+`config/station_registry.yaml` is the **single source of truth** for station geometry.
+The Gazebo world, the navigation planner, the detector and the security checks all read
+it, and `scripts/check_world_sync.py` fails if any of them drift apart.
+
+| ID | Station | Task | Berth | Approach | Board centre | Board faces |
+|---|---|---|---|---|---|---|
+| 0 | Inspection | Inspection (~3.0 s) | `[1.0, 2.0]` | 180° | `[-0.65, 2.0]` | `+X` |
+| 1 | Assembly | Assembly (~3.5 s) | `[4.5, 1.0]` | −90° | `[4.5, -0.65]` | `+Y` |
+| 2 | Storage | Storage (~2.7 s) | `[4.5, 5.0]` | 0° | `[6.15, 5.0]` | `−X` |
+| 3 | Charging | Charging (~3.5 s) | `[0.5, 5.5]` | +90° | `[0.5, 7.15]` | `−Y` |
+
+Each bay carries a three-part sign stack — accent nameplate, matte-white 1.10 m carrier
+board with a 0.70 m `DICT_4X4_50` marker, and a charcoal info plate. Regenerate with:
 
 ```bash
-source ~/ros2_ws/install/setup.bash
-ros2 run secure_station_dispatch mock_image_publisher
-```
-
-### Option B — Run nodes individually (easier for debugging)
-
-```bash
-# Terminal 1 — Task Simulator (action server, start first)
-ros2 run secure_station_dispatch task_simulator
-
-# Terminal 2 — Dispatcher (state machine + action client)
-ros2 run secure_station_dispatch dispatcher
-
-# Terminal 3 — Marker Detector (needs camera feed)
-ros2 run secure_station_dispatch marker_detector
-
-# Terminal 4 — Mock camera (publishes synthetic ArUco images)
-ros2 run secure_station_dispatch mock_image_publisher
-```
-
-### Option C — Skip camera, test pipeline directly
-
-This publishes `StationMarker` messages directly (bypasses ArUco detection):
-
-```bash
-# Terminals 1 + 2: task_simulator + dispatcher running (see Option B above)
-
-# Terminal 3 — End-to-end pipeline test
-ros2 run secure_station_dispatch test_dispatch_pipeline
+python3 scripts/generate_marker_boards.py   # prints a detection range sweep
+python3 scripts/generate_world.py           # projects the registry into SDF
 ```
 
 ---
 
-## Verifying the Pipeline
+## Navigation
 
-### Expected console output (dispatcher terminal)
+`secure_station_dispatch/navigation/` is deliberately ROS-free so the whole tour can be
+replayed offline in the test suite.
 
-```
-[INFO] DispatcherNode ready | state=IDLE | log=logs/dispatch_events.jsonl
-[INFO] [DETECT] Received marker 0 → Inspection Station (conf=0.95)
-[INFO] [DISPATCH] Inspection Station | state → TASK_IN_PROGRESS
-[INFO] [ACTION] Goal accepted — task running…
-[INFO] [FEEDBACK] Inspection Station | Step 1/5: Positioning sensor array (0%)
-[INFO] [FEEDBACK] Inspection Station | Step 2/5: Scanning surface zone A (12%)
-...
-[INFO] [RESULT] Inspection Station → COMPLETED | Inspection complete in 3.0 s
-[INFO] [STATE] → IDLE
-```
+- **`planner.py`** — every leg is a shortest collision-free polyline over the visibility
+  graph of the inflated obstacle corners (A\*, plus a shortcut pass). Two clearance
+  layers: a **hard** footprint equal to the robot radius (0.28 m), and a **soft** layer
+  adding the safety margin (0.43 m total). A berth may sit inside a soft halo — it has to,
+  to read the board — but never inside a hard footprint.
+- **`controller.py`** — turn-then-arc pursuit. Heading errors beyond 0.55 rad are turned
+  out on the spot rather than arced away, because arcing wide is how a robot cuts the
+  corner the planner just routed it around. Linear speed is proportional to range and
+  attenuated by heading error, so the robot decelerates into the berth.
+- **`StallWatchdog`** — aborts a leg the moment the robot is commanded to move and does
+  not (< 4 cm in 3 s). The leg then reverses 0.35 m, turns 0.70 rad and **re-plans from
+  the freed pose**, up to three times. Time spent deliberately stationary never counts.
 
-### Expected console output (task simulator terminal)
-
-```
-[INFO] TaskSimulatorNode ready — action server /station_task active.
-[INFO] [GOAL] Received goal: task_type="Inspection Station" station="Inspection Station"
-[INFO] [TASK START] Inspection Station at Inspection Station (5 steps, ~3.0s)
-[INFO]   [1/5] Positioning sensor array (0%)
-[INFO]   [2/5] Scanning surface zone A (12%)
-...
-[INFO] [TASK COMPLETE] Inspection Station complete at Inspection Station in 3.0 s (5 steps)
-```
-
-### Checking the event log
-
-```bash
-cat logs/dispatch_events.jsonl | python3 -m json.tool --no-ensure-ascii
-```
-
-Expected record format:
-
-```json
-{"timestamp": "2026-08-18T07:00:01.123+00:00", "ros_time": 1234567890000,
- "marker_id": 0, "station": "Inspection Station", "outcome": "DISPATCHED", "summary": ""}
-{"timestamp": "2026-08-18T07:00:04.456+00:00", "ros_time": 1234570890000,
- "marker_id": 0, "station": "Inspection Station", "outcome": "COMPLETED",
- "summary": "Inspection Station complete at Inspection Station in 3.0 s (5 steps)"}
-```
-
-### Running the automated test
-
-```bash
-# With nodes running in background:
-python3 test/test_dispatch_pipeline.py
-
-# Expected output (after ~40 seconds for all 4 tasks):
-# ============================================================
-#   PIPELINE TEST SUMMARY
-# ============================================================
-#   Events logged    : 8
-#   DISPATCHED events: 4
-#   COMPLETED events : 4
-#
-#   Marker 0: dispatched=True  completed=True   ✓ PASS
-#   Marker 1: dispatched=True  completed=True   ✓ PASS
-#   Marker 2: dispatched=True  completed=True   ✓ PASS
-#   Marker 3: dispatched=True  completed=True   ✓ PASS
-#
-#   OVERALL: ✓ PASS — Phase 1 pipeline working
-# ============================================================
-```
+A leg that does not arrive is reported as a failed berth and the node exits non-zero. The
+tour never again reports success it did not achieve.
 
 ---
 
-## Inspecting the topic graph
+## Perception
 
-```bash
-# List all active topics
-ros2 topic list
+The detector scores confidence from apparent marker size:
 
-# Watch marker detections live
-ros2 topic echo /station_marker
-
-# Watch action server status
-ros2 action list
-ros2 action info /station_task
-
-# Node graph
-rqt_graph
+```
+confidence = min(marker_perimeter_px / 1200, 1.0)
 ```
 
----
+which makes `min_confidence` a **range gate** as much as a quality gate. The facility was
+laid out against that, not the other way round:
 
-## Stations & Markers
-
-| Marker ID | Station Name | Task Type | Sim Duration |
+| Camera range | Marker px | Confidence | Verdict |
 |---|---|---|---|
-| 0 | Inspection Station | Inspection | ~3.0 s |
-| 1 | Assembly Station | Assembly | ~3.5 s |
-| 2 | Storage Station | Storage | ~2.7 s |
-| 3 | Charging Station | Charging | ~3.5 s |
+| < 1.33 m | — | — | board clips the frame, detection drops out |
+| **1.50 m** | **259** | **0.86** | **accept — this is the berth** |
+| 1.72 m | 226 | 0.75 | accept (gate) |
+| 1.90 m | 204 | 0.68 | reject |
+| 2.50 m | 155 | 0.52 | reject |
+
+A board is therefore legible from its own berth and nowhere else — which is what stops the
+robot dispatching a bay it is merely driving past. The maths lives as executable code in
+`navigation/perception_budget.py` and is re-derived from the shipped registry on every
+test run.
 
 ---
 
-## Phase 2 — Security & Anti-Spoofing Extensions
+## Security
 
-Once the baseline pipeline was reliable, Phase 2 investigated how vulnerable visual dispatch logic can be in open industrial environments. If an attacker presents a printed ArUco marker or broadcasts fake marker detection ROS messages, an AMR could be tricked into triggering invalid tasks. I implemented HMAC-SHA256 signature verification to authenticate marker messages alongside spatial tolerance checks to ensure the AMR is physically present near the station before executing a goal.
-
-### What's added
-
-| Feature | Implementation |
-|---|---|
-| HMAC authentication | `marker_detector_node` signs each message; dispatcher verifies |
-| Pose consistency check | Dispatcher rejects detections outside expected station radius |
-| Spoof attack demo | `attacks/spoof_marker_publish.py` — publishes unsigned message |
-| Location attack demo | `attacks/location_mismatch_attack.py` — valid signature, wrong pose |
-
-### Enable Phase 2 checks
+| Attack | Mitigation | Outcome logged |
+|---|---|---|
+| Forged `StationMarker` published on the topic | HMAC-SHA256 over `marker_id + station_name`, keyed per station | `AUTH_FAIL` |
+| Valid signature replayed from the wrong place | `check_pose()` against `expected_pose` ± `pose_tolerance_m` | `LOCATION_MISMATCH` |
+| A genuine board read from across the facility | Confidence gate doubles as a range gate | never published |
+| The same bay dispatched repeatedly at one berth | Per-marker cooldown after completion | `COOLDOWN` (throttled) |
 
 ```bash
-ros2 launch secure_station_dispatch station_dispatch.launch.py enable_security:=true
-```
-
-### Running Phase 2 Security Test Suite
-
-```bash
-# Run the automated security test (launches task_simulator & dispatcher with security enabled)
+# Both attacks, end to end
 bash test/run_security_test.sh
-```
 
-Expected security test summary:
-```
-============================================================
-  PHASE 2 SECURITY TEST SUMMARY
-============================================================
-  Total security events logged: 4
-  Valid dispatches           : 1
-  Valid completions          : 1
-  AUTH_FAIL rejections       : 1
-  LOCATION_MISMATCH rejections: 1
-
-  Test 1 (Valid signed marker):        ✓ PASS
-  Test 2 (Spoofed HMAC rejected):      ✓ PASS
-  Test 3 (Location mismatch rejected): ✓ PASS
-
-  OVERALL: ✓ PASS — All Phase 2 security protections working
-============================================================
-```
-
-### Running Individual Attack Demonstrations
-
-```bash
-# Terminal 1: Task Simulator
-ros2 run secure_station_dispatch task_simulator
-
-# Terminal 2: Dispatcher (Security Enabled)
-ros2 run secure_station_dispatch dispatcher --ros-args -p enable_security:=true
-
-# Terminal 3: Run Spoofing Attack (Unsigned / forged signature -> AUTH_FAIL)
+# Or individually, against a running dispatcher with enable_security:=true
 ros2 run secure_station_dispatch spoof_marker_publish
-
-# Terminal 3: Run Location Mismatch Attack (Valid signature, wrong pose -> LOCATION_MISMATCH)
 ros2 run secure_station_dispatch location_mismatch_attack
 ```
 
-### Architecture
-
-The `security/checks.py` module provides `verify_hmac()` and `check_pose()`.  
-In Phase 1 both return `True` unconditionally.  
-In Phase 2, real HMAC verification and spatial tolerance checks are activated.
+`pose_tolerance_m` (0.5 m) is deliberately wider than the navigation `goal_tolerance_m`
+(0.10 m), so a correctly berthed robot can never be rejected as a location mismatch.
 
 ---
 
-## Phase 3 — Gazebo Simulation & Waypoint Tour
+## Testing
 
-Phase 3 transitions the project from script-based synthetic publishers into a full visual Gazebo Sim environment. I created a 3D warehouse world (`industrial_station_world.sdf`) featuring physical station walls with 4x4 ArUco marker textures and an AMR robot equipped with a camera sensor and differential drive control. During integration, an interesting bug arose where single-channel grayscale OpenCV images generated by OpenCV's ArUco module caused `cv_bridge` to crash with a `KeyError: 16` when converted directly to `bgr8`; explicitly converting the frame to 3-channel BGR before ROS image encoding resolved the issue.
+| Suite | Command | Needs | Time |
+|---|---|---|---|
+| Navigation + perception regressions | `bash test/run_navigation_checks.sh` | nothing | ~1 s |
+| Headless dispatch integration | `bash test/run_gazebo_tour_test.sh` | ROS 2 | ~90 s |
+| Phase 1 pipeline | `bash test/run_test.sh` | ROS 2 | ~60 s |
+| Phase 2 security | `bash test/run_security_test.sh` | ROS 2 | ~30 s |
+| Full simulated demo | `ros2 launch … gazebo_demo.launch.py` | ROS 2 + Gazebo | ~2 min |
 
-### Features
-- **Gazebo Sim World**: `worlds/industrial_station_world.sdf` containing ground, lighting, station walls with high-contrast 4x4_50 ArUco marker textures.
-- **AMR Robot Model**: Differential-drive mobile robot with front-facing camera sensor publishing to `/camera/image_raw`.
-- **Scripted Waypoint Tour**: `waypoint_tour_node.py` navigates the robot to Inspection, Assembly, Storage, and Charging stations in sequence.
-- **ROS GZ Bridge**: Bridges Gazebo `/camera/image_raw`, `/cmd_vel`, and `/odom` topics to ROS 2.
+The ROS-free suite is the one that pins the Phase 3 fix. It replays the entire tour —
+planner, control law, watchdog and a unicycle model of the robot — at the node's real
+20 Hz rate and checks the footprint against the hard obstacle inflation on every tick:
 
-### Running the Gazebo Demo & Tour
+```
+$ bash test/run_navigation_checks.sh
+  world / registry synchronisation ....... 12 collision models inside their footprints
+  planner + perception regression ........ 17/17 passed
+  offline tour simulation ................ 6/6 passed
+
+  tour duration     73.5 s simulated      obstacle contacts   0
+  worst berth error 9.9 cm (tol 10 cm)    minimum clearance   0.528 m
+```
+
+Two tests exist specifically so the original defect cannot come back:
+
+- `test_original_collision_is_detected_and_routed_around` rebuilds the *old* panel
+  geometry and asserts the planner flags the Assembly→Storage line and detours safely.
+- `test_watchdog_fires_when_the_robot_is_blocked` drives a simulated robot into a wall and
+  asserts the leg aborts well before the segment timeout.
+
+Under `colcon`:
 
 ```bash
-# Launch full Gazebo Sim demo with security enabled and automated tour
-ros2 launch secure_station_dispatch gazebo_demo.launch.py
-
-# Or run the automated tour test runner script
-bash test/run_gazebo_tour_test.sh
+colcon test --packages-select secure_station_dispatch
+colcon test-result --verbose
 ```
 
 ---
 
-## Troubleshooting
+## Package structure
 
-| Problem | Fix |
+```
+secure_station_dispatch/
+├── config/station_registry.yaml       ← single source of truth
+├── msg/StationMarker.msg
+├── action/StationTask.action
+├── launch/
+│   ├── gazebo_demo.launch.py          full simulated demo
+│   └── station_dispatch.launch.py     nodes only
+├── secure_station_dispatch/
+│   ├── marker_detector_node.py        camera → ArUco → StationMarker
+│   ├── dispatcher_node.py             state machine, security, cooldown
+│   ├── task_simulator_node.py         StationTask action server
+│   ├── waypoint_tour_node.py          obstacle-aware scripted tour
+│   ├── navigation/                    ROS-free: planner, controller, budget
+│   └── security/checks.py             HMAC + pose consistency
+├── worlds/industrial_station_world.sdf   ← generated
+├── models/materials/textures/            ← generated signage
+├── scripts/
+│   ├── generate_world.py              registry → SDF
+│   ├── generate_marker_boards.py      registry → signage + verification
+│   ├── check_world_sync.py            drift guard
+│   └── render_facility_map.py         docs figures
+├── test/
+│   ├── test_waypoint_planner.py       planner + perception regressions
+│   ├── test_tour_simulation.py        offline full-tour simulation
+│   ├── test_dispatch_pipeline.py      Phase 1 integration
+│   ├── test_security_checks.py        Phase 2 integration
+│   ├── mock_image_publisher.py        synthetic, pose-aware camera
+│   └── run_*.sh                       suite runners
+├── attacks/                           spoofing + location-mismatch demos
+└── docs/                              architecture, root cause, runbook
+```
+
+---
+
+## Documentation
+
+| Document | What it covers |
 |---|---|
-| `ModuleNotFoundError: cv2.aruco` | `pip install opencv-contrib-python` (not `opencv-python`) |
-| Action server not found | Start `task_simulator` before `dispatcher` |
-| No markers detected | Check `/camera/image_raw` is publishing: `ros2 topic hz /camera/image_raw` |
-| Log file not created | Ensure `logs/` directory exists in your CWD or set `log_path` parameter |
-| Build fails on rosidl | Make sure `rosidl_default_generators` is installed for your distro |
+| **[docs/architecture.md](docs/architecture.md)** | Runtime topology, the registry as source of truth, navigation and perception design, security model, build notes |
+| **[docs/root-cause-phase3-collision.md](docs/root-cause-phase3-collision.md)** | The marker-panel collision: timeline, the four defects behind it, the fix, and the tests that pin it |
+| **[docs/runbook.md](docs/runbook.md)** | Build, run, verify, regenerate, troubleshoot, tune |
+| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | Release history |
 
 ---
 
 ## License
 
-MIT — see LICENSE file.
+MIT — see `LICENSE`.
