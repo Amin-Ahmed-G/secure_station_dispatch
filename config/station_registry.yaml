@@ -1,55 +1,208 @@
-# station_registry.yaml
-# Maps ArUco marker IDs to station metadata.
-# ────────────────────────────────────────────────────────────────────────────
-# Phase 1 fields (required):
-#   station_name  – human-readable label
-#   task_type     – selects simulation branch in task_simulator_node
+# ═══════════════════════════════════════════════════════════════════════════════
+# station_registry.yaml — single source of truth for secure_station_dispatch
+# ═══════════════════════════════════════════════════════════════════════════════
+# Every consumer of station geometry reads THIS file.  The Gazebo world, the
+# navigation planner, the ArUco detector and the security checks must never
+# disagree about where a station is, so nothing below is duplicated in code.
 #
-# Phase 2 fields (portfolio / security extension, ignored by Phase 1 code):
-#   hmac_key      – pre-shared secret used by detector to sign messages
-#   expected_pose – [x, y, z] expected robot position at this station (metres)
-#   pose_tolerance_m – radius (metres) within which robot_pose is accepted
-# ────────────────────────────────────────────────────────────────────────────
+#   marker_detector_node  → station_name, task_type, hmac_key, aruco_dictionary,
+#                           min_confidence
+#   dispatcher_node       → station_name, hmac_key, expected_pose,
+#                           pose_tolerance_m, redispatch_cooldown_s
+#   waypoint_tour_node    → expected_pose, approach_yaw, world.*, navigation.*
+#   world SDF             → marker_pose, marker_normal, bay_footprint
+#                           (kept in sync by scripts/check_world_sync.py)
+#
+# ── Field reference ───────────────────────────────────────────────────────────
+#   Phase 1
+#     station_name          human-readable label
+#     task_type             selects the simulation branch in task_simulator_node
+#   Phase 2 (security)
+#     hmac_key              pre-shared secret the detector signs messages with
+#     expected_pose         [x, y, z] berth position of the robot datum, metres
+#     pose_tolerance_m      radius within which a reported robot_pose is accepted
+#   Phase 3 (Gazebo + navigation)
+#     approach_yaw          heading (rad) the robot holds at the berth, so that
+#                           the mast camera looks square at the marker board
+#     marker_pose           [x, y, z] centre of the ArUco board in the world
+#     marker_normal         [x, y] outward normal of the board face
+#     bay_footprint         [dx, dy] axis-aligned extent of the bay structure,
+#                           consumed by the navigation planner as an obstacle
+# ═══════════════════════════════════════════════════════════════════════════════
 
 stations:
-  # Marker 0 ─ Inspection Station
+
+  # ── Marker 0 · Inspection Station ───────────────────────────────────────────
+  # West bay.  Robot berths at [1.0, 2.0] facing -X (yaw = pi).
   0:
     station_name: "Inspection Station"
     task_type: "Inspection"
-    # Phase 2 ──────────────────
     hmac_key: "inspect-secret-key-do-not-share"
     expected_pose: [1.0, 2.0, 0.0]
     pose_tolerance_m: 0.5
+    approach_yaw: 3.14159265
+    marker_pose: [-0.65, 2.0, 0.85]
+    marker_normal: [1.0, 0.0]
+    bay_footprint: [0.30, 1.40]
 
-  # Marker 1 ─ Assembly Station
+  # ── Marker 1 · Assembly Station ─────────────────────────────────────────────
+  # South bay.  Robot berths at [4.5, 1.0] facing -Y (yaw = -pi/2).
   1:
     station_name: "Assembly Station"
     task_type: "Assembly"
-    # Phase 2 ──────────────────
     hmac_key: "assembly-secret-key-do-not-share"
     expected_pose: [4.5, 1.0, 0.0]
     pose_tolerance_m: 0.5
+    approach_yaw: -1.57079633
+    marker_pose: [4.5, -0.65, 0.85]
+    marker_normal: [0.0, 1.0]
+    bay_footprint: [1.40, 0.30]
 
-  # Marker 2 ─ Storage Station
+  # ── Marker 2 · Storage Station ──────────────────────────────────────────────
+  # East bay.  Robot berths at [4.5, 5.0] facing +X (yaw = 0).
   2:
     station_name: "Storage Station"
     task_type: "Storage"
-    # Phase 2 ──────────────────
     hmac_key: "storage-secret-key-do-not-share"
     expected_pose: [4.5, 5.0, 0.0]
     pose_tolerance_m: 0.5
+    approach_yaw: 0.0
+    marker_pose: [6.15, 5.0, 0.85]
+    marker_normal: [-1.0, 0.0]
+    bay_footprint: [0.30, 1.40]
 
-  # Marker 3 ─ Charging Station
+  # ── Marker 3 · Charging Station ─────────────────────────────────────────────
+  # North bay.  Robot berths at [0.5, 5.5] facing +Y (yaw = pi/2).
   3:
     station_name: "Charging Station"
     task_type: "Charging"
-    # Phase 2 ──────────────────
     hmac_key: "charging-secret-key-do-not-share"
     expected_pose: [0.5, 5.5, 0.0]
     pose_tolerance_m: 0.5
+    approach_yaw: 1.57079633
+    marker_pose: [0.5, 7.15, 0.85]
+    marker_normal: [0.0, -1.0]
+    bay_footprint: [1.40, 0.30]
 
-# ArUco dictionary used for detection (shared between detector and test scripts)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Perception
+# ═══════════════════════════════════════════════════════════════════════════════
+# DICT_4X4_50 is deliberately low-density: 4x4 payloads stay legible at the
+# 1.75 m berth standoff on a 640x480 sensor (see docs/architecture.md).
 aruco_dictionary: "DICT_4X4_50"
 
-# Minimum confidence threshold for a detection to be published
+# Acceptance gate for marker_detector_node.  Confidence is scored as
+# perimeter/1200 px, so this threshold doubles as a *range* gate.  With a 0.70 m
+# marker on a 1.10 m board the accepted band is roughly 1.48 m - 1.87 m of
+# standoff: closer and the board overflows the frame (OpenCV drops candidate
+# quads that touch the image border), further and the score falls through the
+# gate.  The berth sits at 1.65 m, dead centre.  The far edge is what stops the
+# robot dispatching a bay it is merely driving past -- see
+# secure_station_dispatch.navigation.perception_budget and
+# test/test_waypoint_planner.py::test_no_station_can_be_dispatched_while_merely_driving_past
 min_confidence: 0.75
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# World — geometry mirrored by worlds/industrial_station_world.sdf
+# ═══════════════════════════════════════════════════════════════════════════════
+world:
+  frame_id: "map"
+
+  # Robot staging / dock pose. The tour starts and ends here.
+  home_pose: [0.0, 0.0, 0.0]
+
+  # Drivable floor extents (inside the perimeter walls), metres.
+  bounds:
+    x_min: -1.5
+    x_max:  7.0
+    y_min: -1.5
+    y_max:  8.0
+
+  # Marker board geometry, shared by the world SDF and the detection budget.
+  marker_board:
+    board_size_m:  1.10
+    marker_size_m: 0.70
+    board_height_m: 0.85        # board centre above the floor == camera height
+    standoff_m: 1.65            # robot datum → board plane at the berth
+
+  # Static obstacles the navigation planner must route around, as axis-aligned
+  # boxes: centre [x, y] and full extent [dx, dy] in metres.  Bay structures are
+  # derived from stations[*].marker_pose + bay_footprint and need not be listed.
+  obstacles:
+    - {name: "wall_west",   center: [-1.50, 3.25], size: [0.20, 9.50]}
+    - {name: "wall_east",   center: [ 7.00, 3.25], size: [0.20, 9.50]}
+    - {name: "wall_south",  center: [ 2.75, -1.50], size: [8.50, 0.20]}
+    - {name: "wall_north",  center: [ 2.75, 8.00], size: [8.50, 0.20]}
+    - {name: "rack_centre", center: [ 4.50, 3.20], size: [1.60, 0.90]}
+    - {name: "rack_east",   center: [ 6.00, 3.20], size: [0.90, 1.80]}
+    - {name: "pallet_west", center: [ 1.80, 3.80], size: [0.90, 0.90]}
+    - {name: "pallet_ne",   center: [ 5.90, 6.90], size: [0.90, 0.90]}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Navigation — tuning for waypoint_tour_node and secure_station_dispatch.navigation
+# ═══════════════════════════════════════════════════════════════════════════════
+navigation:
+  # Footprint.  robot_radius_m is the circumscribed radius of the widest part of
+  # the robot: the 0.40 m long chassis and the drive wheels, whose outer faces
+  # sit at +/-0.1775 m -> sqrt(0.20^2 + 0.1775^2) = 0.267 m, rounded up.
+  # safety_margin_m is the extra clearance obstacles are inflated by, so the
+  # planner keeps 0.43 m between the robot datum and any collision volume.
+  robot_radius_m: 0.28
+  safety_margin_m: 0.15
+
+  # Arrival criteria at a berth.  Tighter than the security pose_tolerance_m,
+  # and chosen so the whole +/- band stays inside the detection window above.
+  goal_tolerance_m: 0.10
+  yaw_tolerance_rad: 0.06
+
+  # Velocity limits published on /cmd_vel.
+  max_linear_speed: 0.45
+  min_linear_speed: 0.05
+  max_angular_speed: 0.90
+  min_angular_speed: 0.12
+
+  # Proportional gains for the pure-pursuit style controller.
+  linear_gain: 0.80
+  angular_gain: 1.40
+
+  # Heading error above which the robot stops and turns on the spot instead of
+  # arcing towards the goal.
+  turn_in_place_rad: 0.55
+
+  # ── Stall detection & recovery ────────────────────────────────────────────
+  # The original tour drove open-loop into the Assembly bay and ground against
+  # it until the leg timed out.  The watchdog below catches that: if the robot
+  # is commanded to move but travels less than stall_min_progress_m within
+  # stall_window_s, the leg is aborted and a recovery is executed.
+  stall_window_s: 3.0
+  stall_min_progress_m: 0.04
+  recovery_backup_m: 0.35
+  recovery_backup_speed: 0.15
+  recovery_turn_rad: 0.70
+  max_recoveries_per_leg: 3
+
+  # Timeouts (wall clock seconds).
+  segment_timeout_s: 45.0
+  rotate_timeout_s: 15.0
+  odom_wait_s: 20.0
+
+  # How long to hold the berth waiting for the dispatcher to report COMPLETED
+  # before giving up and moving on.
+  task_wait_timeout_s: 25.0
+  berth_settle_s: 1.5
+
+  # Return to world.home_pose after the last station.
+  return_home: true
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dispatcher
+# ═══════════════════════════════════════════════════════════════════════════════
+dispatcher:
+  # A berthed robot keeps the marker in frame for several seconds after the
+  # ~3 s task finishes.  Without this cooldown the same bay re-dispatches on the
+  # very next detection frame and the event log double-counts every station.
+  redispatch_cooldown_s: 20.0
