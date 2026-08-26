@@ -69,8 +69,11 @@ class MarkerDetectorNode(Node):
 
         # ── Parameters ────────────────────────────────────────────────────────
         self.declare_parameter('registry_path', '')
-        self.declare_parameter('min_confidence', 0.75)
-        self.declare_parameter('aruco_dictionary', 'DICT_4X4_50')
+        # Negative / empty means "take the value from station_registry.yaml".
+        # Previously these defaults silently overrode the registry, so tuning
+        # min_confidence in the YAML had no effect at all.
+        self.declare_parameter('min_confidence', -1.0)
+        self.declare_parameter('aruco_dictionary', '')
         self.declare_parameter('image_topic', '/camera/image_raw')
         self.declare_parameter('amcl_pose_topic', '/amcl_pose')
         self.declare_parameter('mock_pose_topic', '/mock_pose')
@@ -89,8 +92,14 @@ class MarkerDetectorNode(Node):
                     registry_path = dev_path
 
         self.registry = self._load_registry(registry_path)
-        self.min_confidence: float = self.get_parameter('min_confidence').value
-        dict_name: str = self.get_parameter('aruco_dictionary').value
+
+        min_conf = self.get_parameter('min_confidence').value
+        if min_conf is None or min_conf < 0.0:
+            min_conf = float(self._registry_raw.get('min_confidence', 0.75))
+        self.min_confidence: float = float(min_conf)
+
+        dict_name: str = (self.get_parameter('aruco_dictionary').value
+                          or str(self._registry_raw.get('aruco_dictionary', 'DICT_4X4_50')))
         self.detect_markers = _make_aruco_detector(dict_name)
         self.bridge = CvBridge()
 
@@ -126,14 +135,17 @@ class MarkerDetectorNode(Node):
 
         self.get_logger().info(
             f'MarkerDetectorNode ready — watching {img_topic} '
-            f'| registry: {len(self.registry)} stations'
+            f'| registry: {len(self.registry)} stations '
+            f'| dictionary: {dict_name} | min_confidence: {self.min_confidence:.2f}'
         )
 
     # ── Registry ──────────────────────────────────────────────────────────────
     def _load_registry(self, path: str) -> dict:
+        self._registry_raw: dict = {}
         try:
             with open(path, 'r') as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) or {}
+            self._registry_raw = data
             stations = {int(k): v for k, v in data.get('stations', {}).items()}
             self.get_logger().info(
                 f'Loaded station registry from {path}: '
@@ -215,8 +227,16 @@ class MarkerDetectorNode(Node):
 
     def _estimate_confidence(self, corner) -> float:
         """
-        Heuristic confidence: ratio of marker perimeter² to image area.
-        Returns a value in [0, 1]. Real deployments would use reprojection error.
+        Heuristic confidence from the marker's apparent size in the frame.
+
+        Normalised against a 300 px marker (1200 px perimeter) on a 640x480
+        image, so the score saturates at 1.0 for a close, square-on board and
+        decays with range.  Because ``min_confidence`` then acts as a *range*
+        gate as well as a quality gate, it is what stops the robot dispatching a
+        bay it is only driving past; see
+        ``secure_station_dispatch.navigation.perception_budget`` for the maths
+        the station layout was solved against.  A production system would score
+        reprojection error instead.
         """
         pts = corner[0]  # shape (4, 2)
         perimeter = cv2.arcLength(pts, closed=True)

@@ -20,6 +20,18 @@ Logs every event to:
 
 Phase 2 security hooks are imported from security/checks.py but are no-ops in
 Phase 1 — this keeps Phase 1 logic intact and Phase 2 additive only.
+
+Phase 3 additions
+─────────────────
+1. *Re-dispatch cooldown.*  A berthed robot keeps the marker in frame for
+   several seconds after the ~3 s task finishes.  Without a cooldown the state
+   machine returns to IDLE, the very next detection frame re-dispatches the same
+   station, and the event log double-counts every bay.  Completed markers are now
+   held down for ``dispatcher.redispatch_cooldown_s`` from the registry.
+
+2. */dispatch_status.*  Every logged outcome is mirrored to a ``std_msgs/String``
+   JSON topic so ``waypoint_tour_node`` can wait for a station to actually finish
+   instead of guessing with a fixed dwell.
 """
 
 import os
@@ -33,6 +45,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
+
+from std_msgs.msg import String
 
 from secure_station_dispatch.msg import StationMarker
 from secure_station_dispatch.action import StationTask
@@ -60,6 +74,9 @@ class DispatcherNode(Node):
         self.declare_parameter('log_path', 'logs/dispatch_events.jsonl')
         self.declare_parameter('registry_path', '')
         self.declare_parameter('enable_security', False)  # Phase 2 toggle
+        # Phase 3: negative means "take the value from the registry".
+        self.declare_parameter('redispatch_cooldown_s', -1.0)
+        self.declare_parameter('status_topic', '/dispatch_status')
 
         log_path_param = self.get_parameter('log_path').value
         self._log_path = os.path.abspath(log_path_param)
@@ -82,6 +99,15 @@ class DispatcherNode(Node):
 
         self.registry = self._load_registry(registry_path)
 
+        # ── Re-dispatch cooldown ──────────────────────────────────────────────
+        cooldown = self.get_parameter('redispatch_cooldown_s').value
+        if cooldown is None or cooldown < 0.0:
+            cooldown = float(self._registry_section('dispatcher')
+                             .get('redispatch_cooldown_s', 20.0))
+        self._cooldown_s: float = float(cooldown)
+        self._completed_at: dict[int, float] = {}
+        self._suppressed_since: dict[int, float] = {}
+
         # ── State machine ─────────────────────────────────────────────────────
         self._state = DispatchState.IDLE
         self._active_marker_id: int | None = None
@@ -98,6 +124,14 @@ class DispatcherNode(Node):
             callback_group=self._cb_group,
         )
 
+        # ── Status mirror (Phase 3) ───────────────────────────────────────────
+        # Created before the subscription: _marker_callback logs through
+        # _publish_status, so the publisher must already exist by the time any
+        # detection can arrive.
+        self._status_pub = self.create_publisher(
+            String, self.get_parameter('status_topic').value, 20
+        )
+
         # ── Subscription ──────────────────────────────────────────────────────
         self._sub = self.create_subscription(
             StationMarker,
@@ -109,13 +143,21 @@ class DispatcherNode(Node):
 
         self.get_logger().info(
             f'DispatcherNode ready | state=IDLE | log={self._log_path} '
-            f'| security_mode={self._enable_security}'
+            f'| security_mode={self._enable_security} '
+            f'| redispatch_cooldown={self._cooldown_s:.0f}s'
         )
 
+    def _registry_section(self, key: str) -> dict:
+        """Return a top-level registry section, tolerating a missing file."""
+        section = getattr(self, '_registry_raw', {}).get(key, {})
+        return section if isinstance(section, dict) else {}
+
     def _load_registry(self, path: str) -> dict:
+        self._registry_raw = {}
         try:
             with open(path, 'r') as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) or {}
+            self._registry_raw = data
             stations = {int(k): v for k, v in data.get('stations', {}).items()}
             self.get_logger().info(
                 f'Loaded station registry from {path}: '
@@ -130,9 +172,22 @@ class DispatcherNode(Node):
     def _marker_callback(self, msg: StationMarker):
         # ── State guard: ignore detections while a task is running ────────────
         if self._state == DispatchState.TASK_IN_PROGRESS:
-            self.get_logger().info(
+            self._log_throttled(
+                msg.marker_id,
                 f'[IGNORE] Marker {msg.marker_id} received while '
                 f'TASK_IN_PROGRESS (busy at {self._active_station})'
+            )
+            return
+
+        # ── Re-dispatch cooldown (Phase 3) ────────────────────────────────────
+        # The camera keeps the board framed for the whole berth dwell, so a
+        # completed station would otherwise re-fire on the next frame.
+        remaining = self._cooldown_remaining(msg.marker_id)
+        if remaining > 0.0:
+            self._log_throttled(
+                msg.marker_id,
+                f'[COOLDOWN] Marker {msg.marker_id} ({msg.station_name}) already '
+                f'completed — suppressed for another {remaining:.1f}s'
             )
             return
 
@@ -161,6 +216,27 @@ class DispatcherNode(Node):
 
         # ── Dispatch ──────────────────────────────────────────────────────────
         self._dispatch(msg)
+
+    # ── Cooldown helpers ──────────────────────────────────────────────────────
+    def _cooldown_remaining(self, marker_id: int) -> float:
+        """Seconds left before *marker_id* may be dispatched again."""
+        finished = self._completed_at.get(marker_id)
+        if finished is None or self._cooldown_s <= 0.0:
+            return 0.0
+        return max(0.0, self._cooldown_s - (time.monotonic() - finished))
+
+    def _log_throttled(self, marker_id: int, message: str,
+                       interval_s: float = 5.0) -> None:
+        """Log at most once per *interval_s* per marker.
+
+        Detections arrive at camera rate; without this the console fills with
+        thousands of identical IGNORE/COOLDOWN lines during a single berth dwell.
+        """
+        now = time.monotonic()
+        last = self._suppressed_since.get(marker_id, 0.0)
+        if now - last >= interval_s:
+            self._suppressed_since[marker_id] = now
+            self.get_logger().info(message)
 
     def _dispatch(self, msg: StationMarker):
         """Transition to TASK_IN_PROGRESS and send action goal."""
@@ -213,6 +289,9 @@ class DispatcherNode(Node):
     def _result_callback(self, future):
         result = future.result().result
         outcome = 'COMPLETED' if result.success else 'FAILED'
+        if self._active_marker_id is not None:
+            self._completed_at[self._active_marker_id] = time.monotonic()
+            self._suppressed_since.pop(self._active_marker_id, None)
         self.get_logger().info(
             f'[RESULT] {self._active_station} → {outcome} | {result.summary}'
         )
@@ -270,9 +349,26 @@ class DispatcherNode(Node):
         except Exception as e:
             self.get_logger().error(f'Failed to write log: {e}')
 
+        # Mirror to /dispatch_status so waypoint_tour_node can wait on a real
+        # completion instead of holding a fixed, hopeful dwell at each berth.
+        self._publish_status(record)
+
         self.get_logger().info(
             f'[LOG] {json.dumps({k: record[k] for k in ("marker_id","station","outcome")})}'
         )
+
+
+    def _publish_status(self, record: dict) -> None:
+        """Mirror a dispatch event onto the status topic as compact JSON."""
+        payload = dict(record)
+        payload['state'] = self._state.name
+        payload['cooldown_s'] = round(self._cooldown_remaining(record.get('marker_id') or -1), 2)
+        message = String()
+        message.data = json.dumps(payload)
+        try:
+            self._status_pub.publish(message)
+        except Exception as e:  # publisher torn down during shutdown
+            self.get_logger().debug(f'status publish skipped: {e}')
 
 
 def main(args=None):
